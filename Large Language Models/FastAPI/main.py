@@ -43,8 +43,10 @@ async def upload_document(user_id : str, file : UploadFile):
 
     os.remove(tmp_path)
 
-    vector_store.add_documents(documents=splitted_data,
-                               namespace=user_id,)
+    for doc in splitted_data:
+        doc.metadata["user_id"] = user_id
+
+    vector_store.add_documents(documents=splitted_data)
 
     return {"status": "success", "message": "Document processed successfully"}
 
@@ -57,7 +59,12 @@ async def qa(user_id : str, question : str):
         embedding=embeddings
     )
 
-    retriever = vector_data.as_retriever()
+    retriever = vector_data.as_retriever(
+        search_kwargs={
+            "filter": {"user_id": {"$eq": user_id}},
+            "k": 10
+        }
+    )
 
     llm = ChatOllama(model='llama3.2')
 
