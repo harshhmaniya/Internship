@@ -13,6 +13,8 @@ pypdf = "*"
 fastapi = "*"
 langchain-community = "*"
 uvicorn = "*"
+langchain-aws = "*"
+boto3 = "*"
 
 [dev-packages]
 

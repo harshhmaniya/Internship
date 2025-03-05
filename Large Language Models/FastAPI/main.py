@@ -1,8 +1,9 @@
 import os
+import boto3
+from langchain_aws import BedrockEmbeddings, ChatBedrockConverse
 from tempfile import NamedTemporaryFile
 from fastapi import FastAPI, UploadFile
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_pinecone import PineconeVectorStore
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -10,13 +11,20 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains import create_retrieval_chain
 from pinecone import Pinecone
 from dotenv import load_dotenv
+
 load_dotenv()
 
+bedrock = boto3.client(
+    'bedrock-runtime',
+    region_name='us-east-1'
+)
 
-embeddings = OllamaEmbeddings(model='mxbai-embed-large')
+embeddings = BedrockEmbeddings(
+    client=bedrock,
+    model_id="amazon.titan-embed-text-v2:0"
+)
 
-pinecone_api = os.getenv("PINECONE_API_KEY")
-pc = Pinecone(api_key=pinecone_api)
+pc = Pinecone()
 index = pc.Index(name='example-01')
 vector_store = PineconeVectorStore(
     index=index,
@@ -25,8 +33,9 @@ vector_store = PineconeVectorStore(
 
 app = FastAPI()
 
+
 @app.post("/upload")
-async def upload_document(user_id : str, file : UploadFile):
+async def upload_document(user_id: str, file: UploadFile):
     with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         content = await file.read()
         tmp.write(content)
@@ -52,10 +61,9 @@ async def upload_document(user_id : str, file : UploadFile):
 
 
 @app.post("/qa")
-async def qa(user_id : str, question : str):
+async def qa(user_id: str, question: str):
     vector_data = vector_store.from_existing_index(
         index_name="example-01",
-        namespace=user_id,
         embedding=embeddings
     )
 
@@ -66,15 +74,22 @@ async def qa(user_id : str, question : str):
         }
     )
 
-    llm = ChatOllama(model='llama3.2')
+    llm = ChatBedrockConverse(
+        model="meta.llama3-70b-instruct-v1:0",
+        client=bedrock
+    )
 
     prompt = ChatPromptTemplate.from_messages(
         [
-            ('system', """You are an helpful AI assistant,
-            that gives answer based on context after proper thinking and research of user question.
-            you are a professional at this thing remember that.
-            Context : {context}
-            """),
+            ('system', """You are an AI assistant whose responses must be based exclusively on the information contained in the context provided:
+
+                        {context}
+
+                        Instructions:
+                        1. When a query is provided, search the above context for the answer.
+                        2. If you find relevant information that fully answers the query, provide a detailed and accurate response using that information.
+                        3. If the answer to the query is not found within the provided context or the query concerns topics outside their scope, respond with exactly:
+                           "NO ANSWER FOUND"  """),
             ('user', 'Question : {input}')
         ]
     )
